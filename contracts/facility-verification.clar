@@ -1,121 +1,91 @@
-;; compliance-threshold.clar
-;; Establishes regulatory limits for different environmental metrics
+;; facility-verification.clar
+;; Validates industrial sites and maintains their verification status
 
 (define-data-var admin principal tx-sender)
 
-;; Threshold data structure
-(define-map thresholds
+;; Facility data structure
+(define-map facilities
+  { facility-id: (string-ascii 32) }
   {
-    metric-type: (string-ascii 32),
-    region: (string-ascii 32)
-  }
-  {
-    max-value: int,
-    min-value: int,
-    updated-at: uint,
-    updated-by: principal
+    owner: principal,
+    name: (string-ascii 100),
+    location: (string-ascii 100),
+    verified: bool,
+    registration-date: uint
   }
 )
 
-;; Set a new threshold
-(define-public (set-threshold
-                (metric-type (string-ascii 32))
-                (region (string-ascii 32))
-                (max-value int)
-                (min-value int))
+;; Register a new facility
+(define-public (register-facility (facility-id (string-ascii 32)) (name (string-ascii 100)) (location (string-ascii 100)))
   (let ((caller tx-sender))
-    (if (is-eq caller (var-get admin))
-        (begin
-          (map-set thresholds
-            {
-              metric-type: metric-type,
-              region: region
-            }
-            {
-              max-value: max-value,
-              min-value: min-value,
-              updated-at: block-height,
-              updated-by: caller
-            }
-          )
-          (ok true)
-        )
-        (err u3) ;; Not authorized
+    (if (map-insert facilities { facility-id: facility-id }
+                   {
+                     owner: caller,
+                     name: name,
+                     location: location,
+                     verified: false,
+                     registration-date: block-height
+                   })
+        (ok true)
+        (err u1) ;; Facility ID already exists
     )
   )
 )
 
-;; Get threshold information
-(define-read-only (get-threshold (metric-type (string-ascii 32)) (region (string-ascii 32)))
-  (map-get? thresholds { metric-type: metric-type, region: region })
-)
-
-;; Check if a value exceeds threshold
-(define-read-only (is-compliant (metric-type (string-ascii 32)) (region (string-ascii 32)) (value int))
-  (match (map-get? thresholds { metric-type: metric-type, region: region })
-    threshold (and
-                (>= value (get min-value threshold))
-                (<= value (get max-value threshold))
-              )
-    false ;; No threshold defined, assume non-compliant
-  )
-)
-
-;; Update max threshold value
-(define-public (update-max-threshold
-                (metric-type (string-ascii 32))
-                (region (string-ascii 32))
-                (max-value int))
+;; Verify a facility (admin only)
+(define-public (verify-facility (facility-id (string-ascii 32)))
   (let ((caller tx-sender))
     (if (is-eq caller (var-get admin))
-        (match (map-get? thresholds { metric-type: metric-type, region: region })
-          threshold (begin
-            (map-set thresholds
-              {
-                metric-type: metric-type,
-                region: region
-              }
-              (merge threshold {
-                max-value: max-value,
-                updated-at: block-height,
-                updated-by: caller
-              })
+        (match (map-get? facilities { facility-id: facility-id })
+          facility (begin
+            (map-set facilities
+              { facility-id: facility-id }
+              (merge facility { verified: true })
             )
             (ok true)
           )
-          (err u2) ;; Threshold not found
+          (err u2) ;; Facility not found
         )
         (err u3) ;; Not authorized
     )
   )
 )
 
-;; Update min threshold value
-(define-public (update-min-threshold
-                (metric-type (string-ascii 32))
-                (region (string-ascii 32))
-                (min-value int))
+;; Update facility information (owner only)
+(define-public (update-facility-info
+                (facility-id (string-ascii 32))
+                (name (string-ascii 100))
+                (location (string-ascii 100)))
   (let ((caller tx-sender))
-    (if (is-eq caller (var-get admin))
-        (match (map-get? thresholds { metric-type: metric-type, region: region })
-          threshold (begin
-            (map-set thresholds
-              {
-                metric-type: metric-type,
-                region: region
-              }
-              (merge threshold {
-                min-value: min-value,
-                updated-at: block-height,
-                updated-by: caller
-              })
-            )
-            (ok true)
-          )
-          (err u2) ;; Threshold not found
-        )
-        (err u3) ;; Not authorized
+    (match (map-get? facilities { facility-id: facility-id })
+      facility (if (is-eq caller (get owner facility))
+                  (begin
+                    (map-set facilities
+                      { facility-id: facility-id }
+                      (merge facility {
+                        name: name,
+                        location: location
+                      })
+                    )
+                    (ok true)
+                  )
+                  (err u3) ;; Not authorized
+      )
+      (err u2) ;; Facility not found
     )
+  )
+)
+
+;; Get facility information (public read)
+(define-read-only (get-facility (facility-id (string-ascii 32)))
+  (map-get? facilities { facility-id: facility-id })
+)
+
+;; Check if a facility is verified
+(define-read-only (is-facility-verified (facility-id (string-ascii 32)))
+  (match (map-get? facilities { facility-id: facility-id })
+    facility (get verified facility)
+    false
   )
 )
 
